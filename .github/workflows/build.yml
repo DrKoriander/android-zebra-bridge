@@ -25,6 +25,11 @@ jobs:
     - name: Setup Gradle
       uses: gradle/actions/setup-gradle@v3
 
+    - name: Remove invalid wrapper files
+      run: |
+        rm -f gradlew gradlew.bat
+        rm -rf gradle/wrapper
+
     - name: Generate Gradle Wrapper
       run: gradle wrapper --gradle-version 8.2
 
