@@ -45,8 +45,7 @@ dependencies {
     // NanoHTTPD - Lightweight HTTP Server
     implementation("org.nanohttpd:nanohttpd:2.3.1")
     
-    // Zebra LinkOS SDK
-    implementation("com.zebra.sdk:printer-zsdk:2.15.2631")
+    // No external Zebra SDK needed - using Android Bluetooth directly
     
     // JSON Parsing
     implementation("com.google.code.gson:gson:2.10.1")

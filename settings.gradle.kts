@@ -11,8 +11,6 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
-        // Zebra LinkOS SDK Repository
-        maven { url = uri("https://zebratech.jfrog.io/artifactory/ZSDK-Maven-Releases") }
     }
 }
 

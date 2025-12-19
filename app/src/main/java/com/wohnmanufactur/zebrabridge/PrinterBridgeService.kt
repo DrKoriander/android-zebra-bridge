@@ -5,6 +5,10 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothDevice
+import android.bluetooth.BluetoothManager
+import android.bluetooth.BluetoothSocket
 import android.content.Context
 import android.content.Intent
 import android.os.Build
@@ -13,32 +17,40 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.google.gson.Gson
 import com.google.gson.JsonObject
-import com.zebra.sdk.comm.BluetoothConnection
-import com.zebra.sdk.comm.Connection
-import com.zebra.sdk.printer.ZebraPrinter
-import com.zebra.sdk.printer.ZebraPrinterFactory
 import fi.iki.elonen.NanoHTTPD
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.IOException
+import java.io.OutputStream
+import java.util.UUID
 
 class PrinterBridgeService : Service() {
 
     private var httpServer: BridgeHttpServer? = null
     private val serviceJob = SupervisorJob()
     private val serviceScope = CoroutineScope(Dispatchers.IO + serviceJob)
-    
+
     private var printerAddress: String? = null
-    private var printerConnection: Connection? = null
-    private var zebraPrinter: ZebraPrinter? = null
+    private var bluetoothSocket: BluetoothSocket? = null
+    private var outputStream: OutputStream? = null
+
+    private val bluetoothManager by lazy {
+        getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
+    }
+    private val bluetoothAdapter: BluetoothAdapter? by lazy {
+        bluetoothManager.adapter
+    }
 
     companion object {
         private const val TAG = "PrinterBridgeService"
         private const val NOTIFICATION_ID = 1
         private const val CHANNEL_ID = "zebra_bridge_channel"
         private const val HTTP_PORT = 9100
+        // Standard SPP UUID for Bluetooth Serial
+        private val SPP_UUID: UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
     }
 
     override fun onCreate() {
@@ -117,77 +129,78 @@ class PrinterBridgeService : Service() {
 
     private fun connectToPrinter(): Boolean {
         val address = printerAddress ?: return false
-        
+
         try {
-            if (printerConnection?.isConnected == true) {
+            // Check if already connected
+            if (bluetoothSocket?.isConnected == true) {
                 return true
             }
-            
-            printerConnection = BluetoothConnection(address)
-            printerConnection?.open()
-            zebraPrinter = ZebraPrinterFactory.getInstance(printerConnection)
+
+            // Get Bluetooth device
+            val device: BluetoothDevice = bluetoothAdapter?.getRemoteDevice(address)
+                ?: run {
+                    Log.e(TAG, "Bluetooth adapter not available")
+                    return false
+                }
+
+            // Create socket and connect
+            bluetoothSocket = device.createRfcommSocketToServiceRecord(SPP_UUID)
+            bluetoothSocket?.connect()
+            outputStream = bluetoothSocket?.outputStream
+
             Log.i(TAG, "Connected to printer: $address")
             return true
         } catch (e: Exception) {
             Log.e(TAG, "Failed to connect to printer", e)
+            disconnectPrinter()
             return false
         }
     }
 
     private fun disconnectPrinter() {
         try {
-            printerConnection?.close()
-            printerConnection = null
-            zebraPrinter = null
+            outputStream?.close()
+            bluetoothSocket?.close()
+            outputStream = null
+            bluetoothSocket = null
             Log.i(TAG, "Disconnected from printer")
         } catch (e: Exception) {
             Log.e(TAG, "Error disconnecting from printer", e)
         }
     }
 
-    private fun printLabel(cpclData: String): Boolean {
-        return try {
-            if (!connectToPrinter()) {
-                Log.e(TAG, "Cannot print - not connected to printer")
-                return false
+    private suspend fun printLabel(cpclData: String): Boolean {
+        return withContext(Dispatchers.IO) {
+            try {
+                if (!connectToPrinter()) {
+                    Log.e(TAG, "Cannot print - not connected to printer")
+                    return@withContext false
+                }
+
+                outputStream?.write(cpclData.toByteArray(Charsets.UTF_8))
+                outputStream?.flush()
+                Log.i(TAG, "Label sent to printer")
+                true
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to print label", e)
+                disconnectPrinter()
+                false
             }
-            
-            printerConnection?.write(cpclData.toByteArray(Charsets.UTF_8))
-            Log.i(TAG, "Label sent to printer")
-            true
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to print label", e)
-            disconnectPrinter()
-            false
         }
     }
 
     private fun getPrinterStatus(): JsonObject {
         val status = JsonObject()
-        status.addProperty("connected", printerConnection?.isConnected == true)
+        val isConnected = bluetoothSocket?.isConnected == true
+        status.addProperty("connected", isConnected)
         status.addProperty("printerAddress", printerAddress ?: "")
-        
-        try {
-            if (connectToPrinter()) {
-                zebraPrinter?.let { printer ->
-                    val printerStatus = printer.currentStatus
-                    status.addProperty("isReadyToPrint", printerStatus.isReadyToPrint)
-                    status.addProperty("isPaused", printerStatus.isPaused)
-                    status.addProperty("isHeadOpen", printerStatus.isHeadOpen)
-                    status.addProperty("isPaperOut", printerStatus.isPaperOut)
-                }
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error getting printer status", e)
-            status.addProperty("error", e.message)
-        }
-        
+        status.addProperty("isReadyToPrint", isConnected)
         return status
     }
 
     // Inner class for HTTP Server
     inner class BridgeHttpServer(port: Int) : NanoHTTPD(port) {
-        
+
         private val gson = Gson()
 
         override fun serve(session: IHTTPSession): Response {
@@ -215,27 +228,27 @@ class PrinterBridgeService : Service() {
                 uri == "/status" || uri == "/api/status" -> {
                     handleStatusRequest()
                 }
-                
+
                 // Print endpoint
                 (uri == "/print" || uri == "/api/print") && method == Method.POST -> {
                     handlePrintRequest(session)
                 }
-                
+
                 // Discovery endpoint (for compatibility with Browser Print)
                 uri == "/available" || uri == "/api/available" -> {
                     handleAvailableRequest()
                 }
-                
+
                 // Default printers endpoint (Browser Print compatibility)
                 uri == "/default" || uri == "/api/default" -> {
                     handleDefaultPrinterRequest()
                 }
-                
+
                 // Health check
                 uri == "/health" || uri == "/" -> {
                     handleHealthCheck()
                 }
-                
+
                 else -> {
                     newFixedLengthResponse(
                         Response.Status.NOT_FOUND,
@@ -272,7 +285,7 @@ class PrinterBridgeService : Service() {
                 val jsonBody = try {
                     gson.fromJson(body, JsonObject::class.java)
                 } catch (e: Exception) {
-                    // If not JSON, treat as raw CPCL
+                    // If not JSON, treat as raw CPCL/ZPL
                     null
                 }
 
