@@ -143,18 +143,77 @@ class PrinterBridgeService : Service() {
                     return false
                 }
 
-            // Create socket and connect
-            bluetoothSocket = device.createRfcommSocketToServiceRecord(SPP_UUID)
-            bluetoothSocket?.connect()
-            outputStream = bluetoothSocket?.outputStream
+            // Cancel discovery to speed up connection
+            bluetoothAdapter?.cancelDiscovery()
 
-            Log.i(TAG, "Connected to printer: $address")
-            return true
+            // Try multiple connection methods for Zebra printers
+            bluetoothSocket = tryConnectWithFallbacks(device)
+
+            if (bluetoothSocket?.isConnected == true) {
+                outputStream = bluetoothSocket?.outputStream
+                Log.i(TAG, "Connected to printer: $address")
+                return true
+            }
+
+            return false
         } catch (e: Exception) {
             Log.e(TAG, "Failed to connect to printer", e)
             disconnectPrinter()
             return false
         }
+    }
+
+    /**
+     * Try multiple connection methods - Zebra printers often need insecure RFCOMM
+     */
+    private fun tryConnectWithFallbacks(device: BluetoothDevice): BluetoothSocket? {
+        // Method 1: Insecure RFCOMM (no pairing required - best for Zebra)
+        try {
+            Log.d(TAG, "Trying insecure RFCOMM connection...")
+            val socket = device.createInsecureRfcommSocketToServiceRecord(SPP_UUID)
+            socket.connect()
+            Log.i(TAG, "Connected via insecure RFCOMM")
+            return socket
+        } catch (e: Exception) {
+            Log.w(TAG, "Insecure RFCOMM failed: ${e.message}")
+        }
+
+        // Method 2: Reflection-based connection (works on many devices)
+        try {
+            Log.d(TAG, "Trying reflection-based connection...")
+            val method = device.javaClass.getMethod("createRfcommSocket", Int::class.javaPrimitiveType)
+            val socket = method.invoke(device, 1) as BluetoothSocket
+            socket.connect()
+            Log.i(TAG, "Connected via reflection method")
+            return socket
+        } catch (e: Exception) {
+            Log.w(TAG, "Reflection method failed: ${e.message}")
+        }
+
+        // Method 3: Standard secure RFCOMM (requires pairing)
+        try {
+            Log.d(TAG, "Trying standard RFCOMM connection...")
+            val socket = device.createRfcommSocketToServiceRecord(SPP_UUID)
+            socket.connect()
+            Log.i(TAG, "Connected via standard RFCOMM")
+            return socket
+        } catch (e: Exception) {
+            Log.w(TAG, "Standard RFCOMM failed: ${e.message}")
+        }
+
+        // Method 4: Insecure reflection fallback
+        try {
+            Log.d(TAG, "Trying insecure reflection fallback...")
+            val method = device.javaClass.getMethod("createInsecureRfcommSocket", Int::class.javaPrimitiveType)
+            val socket = method.invoke(device, 1) as BluetoothSocket
+            socket.connect()
+            Log.i(TAG, "Connected via insecure reflection")
+            return socket
+        } catch (e: Exception) {
+            Log.e(TAG, "All connection methods failed: ${e.message}")
+        }
+
+        return null
     }
 
     private fun disconnectPrinter() {
