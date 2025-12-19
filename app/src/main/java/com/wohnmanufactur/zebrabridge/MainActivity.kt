@@ -144,16 +144,10 @@ class MainActivity : AppCompatActivity() {
 
     private fun loadPairedPrinters() {
         if (!hasBluetoothPermission()) return
-        
+
         bluetoothAdapter?.bondedDevices?.forEach { device ->
-            // Filter for likely Zebra printers
-            val name = device.name ?: "Unbekannt"
-            if (name.contains("Zebra", ignoreCase = true) || 
-                name.contains("ZQ", ignoreCase = true) ||
-                name.contains("ZD", ignoreCase = true) ||
-                name.contains("QLn", ignoreCase = true)) {
-                addDiscoveredPrinter(device)
-            }
+            // Show all paired Bluetooth devices (user can select the printer)
+            addDiscoveredPrinter(device)
         }
         updatePrinterList()
     }
