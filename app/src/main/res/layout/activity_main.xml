@@ -48,17 +48,50 @@
 
     </LinearLayout>
 
+    <!-- Manual MAC Address Input -->
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="MAC-Adresse manuell eingeben:"
+        android:textSize="14sp"
+        android:textStyle="bold"
+        android:layout_marginBottom="4dp" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginBottom="16dp">
+
+        <EditText
+            android:id="@+id/editMacAddress"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:hint="z.B. F4:60:77:45:E0:62"
+            android:inputType="textCapCharacters"
+            android:maxLength="17"
+            android:layout_marginEnd="8dp" />
+
+        <Button
+            android:id="@+id/btnSetMac"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Setzen" />
+
+    </LinearLayout>
+
     <Button
         android:id="@+id/btnScanPrinters"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Drucker suchen"
+        android:text="Gekoppelte Geräte anzeigen"
         android:layout_marginBottom="16dp" />
 
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Verfügbare Drucker:"
+        android:text="Gekoppelte Geräte:"
         android:textSize="16sp"
         android:textStyle="bold"
         android:layout_marginBottom="8dp" />
@@ -75,7 +108,7 @@
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Tippen Sie auf einen Drucker, um ihn auszuwählen.\nDie Web-App kann dann über http://localhost:9100 drucken."
+        android:text="Tipp: Falls der Drucker nicht erscheint, geben Sie die MAC-Adresse manuell ein.\nDie Web-App kann dann über http://localhost:9100 drucken."
         android:textSize="12sp"
         android:textColor="#666666"
         android:layout_marginTop="16dp" />

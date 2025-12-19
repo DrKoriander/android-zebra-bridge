@@ -13,6 +13,7 @@ import android.os.Build
 import android.os.Bundle
 import android.widget.ArrayAdapter
 import android.widget.Button
+import android.widget.EditText
 import android.widget.ListView
 import android.widget.TextView
 import android.widget.Toast
@@ -26,11 +27,13 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnStartService: Button
     private lateinit var btnStopService: Button
     private lateinit var btnScanPrinters: Button
+    private lateinit var btnSetMac: Button
+    private lateinit var editMacAddress: EditText
     private lateinit var printerListView: ListView
-    
+
     private val discoveredPrinters = mutableListOf<BluetoothDevice>()
     private lateinit var printerAdapter: ArrayAdapter<String>
-    
+
     private val bluetoothManager by lazy {
         getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
     }
@@ -69,7 +72,7 @@ class MainActivity : AppCompatActivity() {
                     device?.let { addDiscoveredPrinter(it) }
                 }
                 BluetoothAdapter.ACTION_DISCOVERY_FINISHED -> {
-                    statusText.text = "Scan abgeschlossen. ${discoveredPrinters.size} Drucker gefunden."
+                    statusText.text = "Scan abgeschlossen. ${discoveredPrinters.size} Geräte gefunden."
                     btnScanPrinters.isEnabled = true
                 }
             }
@@ -84,6 +87,8 @@ class MainActivity : AppCompatActivity() {
         btnStartService = findViewById(R.id.btnStartService)
         btnStopService = findViewById(R.id.btnStopService)
         btnScanPrinters = findViewById(R.id.btnScanPrinters)
+        btnSetMac = findViewById(R.id.btnSetMac)
+        editMacAddress = findViewById(R.id.editMacAddress)
         printerListView = findViewById(R.id.printerListView)
 
         printerAdapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, mutableListOf<String>())
@@ -92,6 +97,7 @@ class MainActivity : AppCompatActivity() {
         btnStartService.setOnClickListener { startBridgeService() }
         btnStopService.setOnClickListener { stopBridgeService() }
         btnScanPrinters.setOnClickListener { scanForPrinters() }
+        btnSetMac.setOnClickListener { setManualMacAddress() }
 
         printerListView.setOnItemClickListener { _, _, position, _ ->
             selectPrinter(position)
@@ -104,6 +110,9 @@ class MainActivity : AppCompatActivity() {
         }
         registerReceiver(bluetoothReceiver, filter)
 
+        // Load saved MAC address into EditText
+        loadSavedMacAddress()
+
         checkPermissions()
         loadPairedPrinters()
     }
@@ -115,6 +124,38 @@ class MainActivity : AppCompatActivity() {
         } catch (e: Exception) {
             // Receiver was not registered
         }
+    }
+
+    private fun loadSavedMacAddress() {
+        val prefs = getSharedPreferences("ZebraBridge", Context.MODE_PRIVATE)
+        val savedAddress = prefs.getString("printer_address", null)
+        val savedName = prefs.getString("printer_name", "")
+
+        if (savedAddress != null) {
+            editMacAddress.setText(savedAddress)
+            statusText.text = "Gespeicherter Drucker: $savedName ($savedAddress)"
+        }
+    }
+
+    private fun setManualMacAddress() {
+        val macAddress = editMacAddress.text.toString().trim().uppercase()
+
+        // Validate MAC address format
+        val macRegex = Regex("^([0-9A-F]{2}:){5}[0-9A-F]{2}$")
+        if (!macRegex.matches(macAddress)) {
+            Toast.makeText(this, "Ungültiges MAC-Format. Beispiel: F4:60:77:45:E0:62", Toast.LENGTH_LONG).show()
+            return
+        }
+
+        // Save the MAC address
+        val prefs = getSharedPreferences("ZebraBridge", Context.MODE_PRIVATE)
+        prefs.edit()
+            .putString("printer_address", macAddress)
+            .putString("printer_name", "Manuell: $macAddress")
+            .apply()
+
+        statusText.text = "MAC-Adresse gesetzt: $macAddress"
+        Toast.makeText(this, "Drucker-Adresse gespeichert: $macAddress", Toast.LENGTH_SHORT).show()
     }
 
     private fun checkPermissions() {
@@ -167,7 +208,7 @@ class MainActivity : AppCompatActivity() {
                 adapter.cancelDiscovery()
             }
             adapter.startDiscovery()
-            statusText.text = "Suche nach Druckern..."
+            statusText.text = "Suche nach Geräten..."
             btnScanPrinters.isEnabled = false
         }
     }
@@ -181,7 +222,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun updatePrinterList() {
         if (!hasBluetoothPermission()) return
-        
+
         printerAdapter.clear()
         discoveredPrinters.forEach { device ->
             val name = device.name ?: "Unbekannt"
@@ -192,15 +233,16 @@ class MainActivity : AppCompatActivity() {
 
     private fun selectPrinter(position: Int) {
         if (position >= discoveredPrinters.size) return
-        
+
         val device = discoveredPrinters[position]
         val prefs = getSharedPreferences("ZebraBridge", Context.MODE_PRIVATE)
         prefs.edit()
             .putString("printer_address", device.address)
             .putString("printer_name", device.name ?: "Unbekannt")
             .apply()
-        
+
         val name = if (hasBluetoothPermission()) device.name ?: "Unbekannt" else "Unbekannt"
+        editMacAddress.setText(device.address)
         statusText.text = "Drucker ausgewählt: $name"
         Toast.makeText(this, "Drucker $name ausgewählt", Toast.LENGTH_SHORT).show()
     }
@@ -208,9 +250,9 @@ class MainActivity : AppCompatActivity() {
     private fun startBridgeService() {
         val prefs = getSharedPreferences("ZebraBridge", Context.MODE_PRIVATE)
         val printerAddress = prefs.getString("printer_address", null)
-        
+
         if (printerAddress == null) {
-            Toast.makeText(this, "Bitte zuerst einen Drucker auswählen", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Bitte zuerst einen Drucker auswählen oder MAC-Adresse eingeben", Toast.LENGTH_LONG).show()
             return
         }
 
@@ -220,8 +262,8 @@ class MainActivity : AppCompatActivity() {
         } else {
             startService(intent)
         }
-        
-        statusText.text = "Bridge Service gestartet auf Port 9100"
+
+        statusText.text = "Bridge Service gestartet auf Port 9100\nDrucker: $printerAddress"
         btnStartService.isEnabled = false
         btnStopService.isEnabled = true
     }
@@ -229,7 +271,7 @@ class MainActivity : AppCompatActivity() {
     private fun stopBridgeService() {
         val intent = Intent(this, PrinterBridgeService::class.java)
         stopService(intent)
-        
+
         statusText.text = "Bridge Service gestoppt"
         btnStartService.isEnabled = true
         btnStopService.isEnabled = false
